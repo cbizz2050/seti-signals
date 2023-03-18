@@ -2,8 +2,16 @@ import torch
 import torch.nn as nn
 from torchvision.models import resnet18
 from transformers import ViTModel, ViTConfig
+import timm
 
-class SETIDetectionModel(nn.Module):
+class BaseModel(nn.Module):
+    def __init__(self):
+        super(BaseModel, self).__init__()
+
+    def forward(self, x):
+        raise NotImplementedError("You should implement the forward method in your model!")
+
+class ViTLSTMDetectionModel(BaseModel):
     def __init__(self, pretrained=True):
         super(SETIDetectionModel, self).__init__()
 
@@ -42,6 +50,24 @@ class SETIDetectionModel(nn.Module):
 
         return x
 
+class EfficientNetModel(BaseModel):
+    def __init__(self, model_name="efficientnet_b0", pretrained=True):
+        super(EfficientNetModel, self).__init__()
+
+        # Load EfficientNet model
+        self.efficientnet = timm.create_model(model_name, pretrained=pretrained, in_chans=1, num_classes=1)
+
+    def forward(self, x):
+        # Forward pass through the EfficientNet model
+        x = self.efficientnet(x)
+        x = torch.sigmoid(x)
+        return x
+
 if __name__ == "__main__":
-    model = SETIDetectionModel()
-    print(model)
+    model1 = ViTLSTMDetectionModel()
+    print("ViTLSTMDetectionModel:")
+    print(model1)
+
+    model2 = EfficientNetModel()
+    print("\nEfficientNetModel:")
+    print(model2)
