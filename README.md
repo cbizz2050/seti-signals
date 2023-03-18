@@ -8,7 +8,6 @@ The dataset consists of two-dimensional arrays, or spectrograms, representing th
 
 ## Project Structure
 <pre>
-```
 project/
 │
 ├── data/
@@ -27,7 +26,6 @@ project/
 │
 ├── README.md
 └── requirements.txt
-```
 </pre>
 
 
@@ -45,22 +43,22 @@ project/
 ## Getting Started
 
 1. Clone the repository:
-'''
+```
 git clone https://github.com/yourusername/seti-signal-detection.git
-'''
+```
 2. Install the required packages:
-'''
+```
 cd seti-signal-detection
 pip install -r requirements.txt
-'''
+```
 3. Explore the data using the provided Jupyter Notebook:
-'''
+```
 jupyter notebook notebooks/exploratory_data_analysis.ipynb
-'''
+```
 4. Develop and train your own models using the provided source code as a starting point:
-'''
+```
 python src/models.py
-'''
+```
 
 # Data Visualization
 ![Spectogram Samples](https://storage.googleapis.com/kaggle-media/competitions/SETI-Berkeley/Screen%20Shot%202021-05-03%20at%2011.39.42.png "Spectogram Samples")
