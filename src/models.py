@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torchvision.models import resnet18
 from transformers import ViTModel, ViTConfig
 import timm
 
@@ -12,8 +11,8 @@ class BaseModel(nn.Module):
         raise NotImplementedError("You should implement the forward method in your model!")
 
 class ViTLSTMDetectionModel(BaseModel):
-    def __init__(self, pretrained=True):
-        super(SETIDetectionModel, self).__init__()
+    def __init__(self, pretrained=True, rnn_type="lstm"):
+        super(ViTLSTMDetectionModel, self).__init__()
 
         # Initialize a vision transformer
         vit_config = ViTConfig(image_size=256, patch_size=32, num_channels=1, num_classes=1)
@@ -21,8 +20,9 @@ class ViTLSTMDetectionModel(BaseModel):
         if pretrained:
             self.vit.init_weights()
 
-        # Initialize an LSTM for temporal sequence analysis
-        self.lstm = nn.LSTM(input_size=vit_config.hidden_size, hidden_size=512, num_layers=2, batch_first=True, dropout=0.5, bidirectional=True)
+        # Initialize an LSTM or GRU for temporal sequence analysis
+        rnn_layer = {"lstm": nn.LSTM, "gru": nn.GRU}[rnn_type.lower()]
+        self.rnn = rnn_layer(input_size=vit_config.hidden_size, hidden_size=512, num_layers=2, batch_first=True, dropout=0.5, bidirectional=True)
 
         # Final fully connected layers
         self.fc1 = nn.Linear(512 * 2, 128)
@@ -37,8 +37,8 @@ class ViTLSTMDetectionModel(BaseModel):
         x = x.pooler_output
         x = x.view(batch_size, sequence_length, -1)
 
-        # Pass the output through the LSTM
-        x, _ = self.lstm(x)
+        # Pass the output through the LSTM or GRU
+        x, _ = self.rnn(x)
 
         # Final fully connected layers
         x = x[:, -1, :]
@@ -63,11 +63,17 @@ class EfficientNetModel(BaseModel):
         x = torch.sigmoid(x)
         return x
 
+'''
 if __name__ == "__main__":
-    model1 = ViTLSTMDetectionModel()
-    print("ViTLSTMDetectionModel:")
+    model1 = ViTLSTMDetectionModel(rnn_type="lstm")
+    print("ViTLSTMDetectionModel (LSTM):")
     print(model1)
 
-    model2 = EfficientNetModel()
-    print("\nEfficientNetModel:")
+    model2 = ViTLSTMDetectionModel(rnn_type="gru")
+    print("\nViTLSTMDetectionModel (GRU):")
     print(model2)
+
+    model3 = EfficientNetModel()
+    print("\nEfficientNetModel:")
+    print(model3)
+'''
