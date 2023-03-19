@@ -44,8 +44,8 @@ val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
 
 # Create models
 models = [
-    ("ViTDetectionModel_LSTM", ViTDetectionModel(rnn_type="lstm")),
-    ("ViTDetectionModel_GRU", ViTDetectionModel(rnn_type="gru")),
+   # ("ViTDetectionModel_LSTM", ViTDetectionModel(rnn_type="lstm")),
+  #  ("ViTDetectionModel_GRU", ViTDetectionModel(rnn_type="gru")),
     ("EfficientNetModel", EfficientNetModel())
 ]
 
@@ -80,7 +80,8 @@ for model_name, model in models:
                 output = model(data)
                 loss = criterion(output.squeeze(), target.float())
                 val_loss += loss.item()
-
+        # Log training loss
+        writer.add_scalar("Loss/Training", train_loss, epoch)
         val_loss /= len(val_loader)
         writer.add_scalar("Loss/Validation", val_loss, epoch)
 
