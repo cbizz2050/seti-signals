@@ -1,94 +1,187 @@
+# train.py
 import os
 import time
+
+import numpy as np
 import torch
-import torch.optim as optim
+from torch import nn, optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.transforms import Compose, Resize, ToTensor, Normalize
+from sklearn.model_selection import train_test_split
 
-from models import ViTDetectionModel, EfficientNetModel
-from dataset import SETIDataset
-from preprocess import load_data, preprocess_data
+from dataset import SETIDataset  # Assuming you have a SETIDataset class defined in seti_dataset.py
+from models import EfficientNetModel
 
-# Function to sample data
-def sample_data(data, labels, sample_percentage):
-    sample_size = int(len(data) * sample_percentage)
-    indices = np.random.choice(len(data), size=sample_size, replace=False)
-    return data[indices], labels[indices]
-
-# Hyperparameters
-epochs = 50
-batch_size = 32
-learning_rate = 1e-4
-sample_percentage = 0.1  # Use 10% of the data
+# Set device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load and preprocess data
-train_labels_path = 'data/train_labels.csv'
-train_folder = 'data/train'
-test_folder = 'data/test'
-train_data, test_data, labels = load_data(train_labels_path, train_folder, test_folder)
+# Hyperparameters
+epochs = 100
+learning_rate = 1e-4
+batch_size = 8  # Reduced batch size to mitigate GPU memory issue
+image_size = 224
+image_means = [0.485, 0.456, 0.406]
+image_stds = [0.229, 0.224, 0.225]
+gradient_accumulation_steps = 4  # Gradient accumulation steps
 
-# Sample data
-train_data, labels = sample_data(train_data, labels, sample_percentage)
+# Transformations
+transform = Compose([
+    Resize((image_size, image_size)),
+    ToTensor(),
+    Normalize(mean=image_means, std=image_stds)
+])
 
-# Preprocess data
-X_train, X_val, y_train, y_val = preprocess_data(train_data, test_data, labels)
+# Load the dataset
+root_dir = "E:\seti-breakthrough-listen\data\\train"
+labels_csv = "E:\seti-breakthrough-listen\data\\train_labels.csv"
 
-# Create SETI Datasets
-train_set = SETIDataset(X_train, y_train)
-val_set = SETIDataset(X_val, y_val)
+dataset = SETIDataset(root_dir=root_dir, labels_csv=labels_csv, transform=transform)  # Create the dataset object
 
-# Create DataLoaders
-train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+# Split the dataset into train and validation sets
+train_indices, val_indices = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=42, stratify=dataset.labels.iloc[:, 1])
+
+train_dataset = SETIDataset(root_dir=root_dir, labels_csv=labels_csv, transform=transform)
+val_dataset = SETIDataset(root_dir=root_dir, labels_csv=labels_csv, transform=transform)
+
+train_dataloader = DataLoader(train_dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(train_indices), num_workers=4, prefetch_factor=2)
+val_dataloader = DataLoader(val_dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(val_indices), num_workers=4, prefetch_factor=2)
+
+# Mixed-precision training (automatic mixed precision - AMP)
+scaler = torch.cuda.amp.GradScaler()
 
 # Create models
 models = [
-   # ("ViTDetectionModel_LSTM", ViTDetectionModel(rnn_type="lstm")),
-  #  ("ViTDetectionModel_GRU", ViTDetectionModel(rnn_type="gru")),
-    ("EfficientNetModel", EfficientNetModel())
+    ("EfficientNetModel_b0", EfficientNetModel(model_name="efficientnet_b0")),
+    ("EfficientNetModel_b1", EfficientNetModel(model_name="efficientnet_b1")),
+    ("EfficientNetModel_b2", EfficientNetModel(model_name="efficientnet_b2"))
 ]
 
-for model_name, model in models:
-    print(f"Training {model_name}")
+# EarlyStopping class
+class EarlyStopping:
+    def __init__(self, patience=7, verbose=False):
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = float("inf")
 
-    model = model.to(device)
-    criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    writer = SummaryWriter(log_dir=f"logs/{model_name}")
+    def __call__(self, val_loss, model):
+        score = -val_loss
 
-    # Training loop
-    for epoch in range(epochs):
-        model.train()
-        start_time = time.time()
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score:
+            self.counter += 1
+            if self.verbose:
+                print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
 
-        for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = data.to(device), target.to(device)
-            optimizer.zero_grad()
+    def save_checkpoint(self, val_loss, model):
+        if self.verbose:
+            print(f"Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model ...")
+        torch.save(model.state_dict(), "best_model.pth")
+        self.val_loss_min = val_loss
 
-            output = model(data)
-            loss = criterion(output.squeeze(), target.float())
-            loss.backward()
-            optimizer.step()
+# ModelCheckpoint class
+class ModelCheckpoint:
+    def __init__(self, filepath, save_best_only=False):
+        self.filepath = filepath
+        self.save_best_only = save_best_only
+        self.best_val_loss = float("inf")
 
-        # Validation loop
-        model.eval()
-        val_loss = 0
-        with torch.no_grad():
-            for data, target in val_loader:
-                data, target = data.to(device), target.to(device)
-                output = model(data)
-                loss = criterion(output.squeeze(), target.float())
-                val_loss += loss.item()
-        # Log training loss
-        writer.add_scalar("Loss/Training", train_loss, epoch)
-        val_loss /= len(val_loader)
-        writer.add_scalar("Loss/Validation", val_loss, epoch)
+    def __call__(self, val_loss, model):
+        if self.save_best_only:
+            if val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+                torch.save(model.state_dict(), self.filepath)
+        else:
+            torch.save(model.state_dict(), self.filepath)
 
-        print(f"Epoch {epoch + 1}/{epochs} | Loss: {val_loss:.4f} | Time: {time.time() - start_time:.2f}s")
+def train_models():
+    for model_name, model in models:
+        print(f"Training {model_name}")
 
-    # Save the trained model
-    torch.save(model.state_dict(), f"{model_name}_trained.pth")
+        # Send model to device
+        model.to(device)
 
-# Close the SummaryWriter to release resources
-writer.close()
+        # Loss and optimizer
+        criterion = nn.BCEWithLogitsLoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        scheduler = ReduceLROnPlateau(optimizer, "min", patience=3, verbose=True)
+
+        # Early stopping and model checkpoint
+        early_stopping = EarlyStopping(patience=7, verbose=True)
+        model_checkpoint = ModelCheckpoint(f"{model_name}_best.pth", save_best_only=True)
+
+        # TensorBoard summary writer
+        writer = SummaryWriter(log_dir=f"runs/{model_name}")
+
+        # Training loop
+        for epoch in range(epochs):
+            print(f"Epoch [{epoch + 1}/{epochs}]")
+            model.train()
+
+            for batch_idx, (images, labels) in enumerate(train_dataloader):
+                images = images.to(device)
+                labels = labels.to(device)
+                labels = labels.unsqueeze(1).float()  # Add this line
+
+                # Debugging print statements
+                with torch.cuda.amp.autocast():
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+                # Backward pass with mixed-precision training and gradient accumulation
+                scaler.scale(loss).backward()
+
+                if (batch_idx + 1) % gradient_accumulation_steps == 0:
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+
+            # Validation loop
+            model.eval()
+            val_losses = []
+
+            with torch.no_grad():
+                for batch_idx, (images, labels) in enumerate(val_dataloader):
+                    images = images.to(device)
+                    labels = labels.to(device)
+                    labels = labels.unsqueeze(1).float()  # Add this line
+
+                    # Forward pass
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+
+                    val_losses.append(loss.item())
+
+            val_loss = sum(val_losses) / len(val_losses)
+            scheduler.step(val_loss)
+            print(f"Validation loss: {val_loss:.6f}")
+
+            # TensorBoard logging
+            writer.add_scalar("Loss/train", loss.item(), epoch)
+            writer.add_scalar("Loss/val", val_loss, epoch)
+
+            # Early stopping and model checkpoint
+            early_stopping(val_loss, model)
+            model_checkpoint(val_loss, model)
+
+            if early_stopping.early_stop:
+                print("Early stopping")
+                break
+
+        # Load best model and save
+        model.load_state_dict(torch.load("best_model.pth"))
+        torch.save(model.state_dict(), f"{model_name}_best.pth")
+
+        # Close TensorBoard writer
+        writer.close()
