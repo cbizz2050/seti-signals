@@ -11,9 +11,9 @@ class BaseModel(nn.Module):
     def forward(self, x):
         raise NotImplementedError("You should implement the forward method in your model!")
 
-class ViTLSTMDetectionModel(BaseModel):
+class ViTDetectionModel(BaseModel):
     def __init__(self, pretrained=True, rnn_type="lstm"):
-        super(ViTLSTMDetectionModel, self).__init__()
+        super(ViTDetectionModel, self).__init__()
 
         # Initialize a vision transformer
         vit_config = ViTConfig(image_size=256, patch_size=32, num_channels=1, num_classes=1)
@@ -47,8 +47,7 @@ class ViTLSTMDetectionModel(BaseModel):
         x = torch.relu(x)
         x = self.dropout(x)
         x = self.fc2(x)
-        x = torch.sigmoid(x)
-
+        
         return x
 
 class EfficientNetModel(BaseModel):
@@ -61,20 +60,5 @@ class EfficientNetModel(BaseModel):
     def forward(self, x):
         # Forward pass through the EfficientNet model
         x = self.efficientnet(x)
-        x = torch.sigmoid(x)
         return x
 
-'''
-if __name__ == "__main__":
-    model1 = ViTLSTMDetectionModel(rnn_type="lstm")
-    print("ViTLSTMDetectionModel (LSTM):")
-    print(model1)
-
-    model2 = ViTLSTMDetectionModel(rnn_type="gru")
-    print("\nViTLSTMDetectionModel (GRU):")
-    print(model2)
-
-    model3 = EfficientNetModel()
-    print("\nEfficientNetModel:")
-    print(model3)
-'''
